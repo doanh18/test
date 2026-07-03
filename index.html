@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Manim Studio v38_18_3_45 — Voice Style now isolated per mode (portrait / ngang-notebooklm / ngang-whiteboard): editing/saving one never changes another; portrait hides the Save button. Fixed duplicate id="voicePresets" that was wiping the voice-selection chips. Includes v3_44 upload popup + STT sheet logging, v3_43 whiteboard de-prime. -->
+<!-- Manim Studio v38_18_3_46 — Sheet logging: STT column now OPTIONAL (this sheet has none — "Id" is column A). Requires only Script + final link video; writes to next empty row (the row number is the sequence). Fills only those two columns, leaves Id/status/accounts untouched. Includes v3_45 per-mode voice style, v3_44 upload popup, v3_43 whiteboard de-prime. -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -8686,29 +8686,33 @@ async function logToSheetSmart(scriptText, driveLink, token) {
   const linkIdx   = findIdx(h => h === 'final link video' || (h.includes('final') && h.includes('link') && h.includes('video')));
 
   const missing = [];
-  if (sttIdx < 0)    missing.push('STT');
   if (scriptIdx < 0) missing.push('Script');
   if (linkIdx < 0)   missing.push('final link video');
   if (missing.length) {
     throw new Error(`Không thấy cột: ${missing.join(', ')}. Header đang có: [${headers.map(h => String(h)).join(' | ')}]`);
   }
 
-  // 3) Largest existing STT → next number.
-  let maxStt = 0;
-  for (let r = 1; r < values.length; r++) {
-    const raw = values[r] && values[r][sttIdx];
-    const n = parseInt(String(raw == null ? '' : raw).replace(/[^\d-]/g, ''), 10);
-    if (!isNaN(n) && n > maxStt) maxStt = n;
-  }
-  const nextStt = maxStt + 1;
-
-  // 4) Next empty row = one past the last row that has any data.
+  // 3) Next empty row = one past the last row that has any data.
+  //    The spreadsheet ROW NUMBER is the sequence (STT). If a dedicated STT
+  //    column also exists we fill it with max+1; if not, the row number is enough.
   const nextRow = values.length + 1;
 
-  // 5) Build the row, placing each value in its own column.
-  const width = Math.max(headers.length, sttIdx, scriptIdx, linkIdx) + 1;
-  const row = new Array(width).fill('');
-  row[sttIdx]    = nextStt;
+  let nextStt = null;
+  if (sttIdx >= 0) {
+    let maxStt = 0;
+    for (let r = 1; r < values.length; r++) {
+      const raw = values[r] && values[r][sttIdx];
+      const n = parseInt(String(raw == null ? '' : raw).replace(/[^\d-]/g, ''), 10);
+      if (!isNaN(n) && n > maxStt) maxStt = n;
+    }
+    nextStt = maxStt + 1;
+  }
+
+  // 4) Build the row, placing each value in its own column. Only write up to the
+  //    furthest needed column so trailing columns (status, accounts…) stay untouched.
+  const maxIdx = Math.max(scriptIdx, linkIdx, sttIdx >= 0 ? sttIdx : 0);
+  const row = new Array(maxIdx + 1).fill('');
+  if (sttIdx >= 0) row[sttIdx] = nextStt;
   row[scriptIdx] = scriptText;
   row[linkIdx]   = driveLink;
 
@@ -8756,13 +8760,14 @@ async function handleUploadFlow() {
     const driveLink = uploaded.webViewLink ||
       `https://drive.google.com/file/d/${uploaded.id}/view`;
 
-    saveModalStatus('⏳ Reading sheet & finding next STT…');
+    saveModalStatus('⏳ Reading sheet & finding next row…');
     const scriptText = (document.getElementById('scriptText')?.value || '').trim();
-    const { nextStt } = await logToSheetSmart(scriptText, driveLink, token);
+    const { nextStt, nextRow } = await logToSheetSmart(scriptText, driveLink, token);
 
+    const where = (nextStt != null) ? `STT ${nextStt}` : `row ${nextRow}`;
     const sheetUrl = `https://docs.google.com/spreadsheets/d/${GSHEETS_ID}/edit#gid=0`;
     saveModalStatus(
-      `✓ Done · STT ${nextStt}. <a href="${driveLink}" target="_blank" rel="noopener">Open in Drive</a> · ` +
+      `✓ Done · ${where}. <a href="${driveLink}" target="_blank" rel="noopener">Open in Drive</a> · ` +
       `<a href="${sheetUrl}" target="_blank" rel="noopener">Open Sheet</a>`,
       'ok'
     );
