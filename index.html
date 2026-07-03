@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Manim Studio v38_18_3_43 — whiteboard: de-primed image prompt to stop baked-in hand+marker artifacts (whiteboardDeprime + rewritten DEFAULT_PROMPT_WHITEBOARD + stronger Imagen negative prompt) -->
+<!-- Manim Studio v38_18_3_45 — Voice Style now isolated per mode (portrait / ngang-notebooklm / ngang-whiteboard): editing/saving one never changes another; portrait hides the Save button. Fixed duplicate id="voicePresets" that was wiping the voice-selection chips. Includes v3_44 upload popup + STT sheet logging, v3_43 whiteboard de-prime. -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -926,6 +926,22 @@
   .save-modal .close-x:hover { color: #e6e8ec; background: rgba(255,255,255,0.05); }
   .save-modal-inner { position: relative; }
 
+  /* Drive folder destination popup */
+  .drive-link-input {
+    width: 100%; box-sizing: border-box;
+    background: #1c2029; border: 1px solid #2f3542; border-radius: 8px;
+    color: #e6e8ec; padding: 11px 14px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
+    margin-bottom: 6px;
+  }
+  .drive-link-input:focus { outline: none; border-color: #c8ff2e; }
+  .drive-link-err {
+    color: #ff6b6b; font-size: 11px; font-family: 'JetBrains Mono', monospace;
+    min-height: 14px; margin-bottom: 10px; line-height: 1.4;
+  }
+  .drive-link-actions { display: flex; gap: 10px; }
+  .drive-link-actions .action-btn { flex: 1; }
+
   /* ===== EDITOR VIEW (Phase 2) ===== */
   .editor-view {
     position: fixed; inset: 0;
@@ -1190,6 +1206,24 @@
         </button>
       </div>
       <div class="status-line" id="saveModalStatus"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Drive folder destination popup (asked before every upload) ===== -->
+<div class="save-modal-backdrop" id="driveLinkModal" style="z-index:10001">
+  <div class="save-modal" style="max-width:520px">
+    <div class="save-modal-inner">
+      <button class="close-x" id="driveLinkClose" title="Close">×</button>
+      <h3>☁️ Upload đích</h3>
+      <div class="subtitle">Dán link Google Drive folder để upload video vào đó · Enter = Done</div>
+      <input id="driveLinkInput" class="drive-link-input" type="text"
+        placeholder="https://drive.google.com/drive/folders/..." spellcheck="false" autocomplete="off">
+      <div class="drive-link-err" id="driveLinkErr"></div>
+      <div class="drive-link-actions">
+        <button class="action-btn" id="driveLinkCancel" style="justify-content:center">Huỷ</button>
+        <button class="action-btn primary" id="driveLinkDone" style="justify-content:center">Done → Upload</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1591,14 +1625,14 @@
           <label class="label" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
             <span>Voice Style · ✏️ Editable — customize TTS reading tone</span>
             <span style="display:flex;gap:6px">
-              <button type="button" id="saveVoiceStyleBtn" style="background:linear-gradient(90deg,#c8ff2e,#a7e625);border:none;color:#0d0f14;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;padding:3px 10px;border-radius:4px;cursor:pointer" title="Save current voice style as a preset for the current Ngách/Niche">💾 Save</button>
+              <button type="button" id="saveVoiceStyleBtn" class="landscape-only" style="background:linear-gradient(90deg,#c8ff2e,#a7e625);border:none;color:#0d0f14;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;padding:3px 10px;border-radius:4px;cursor:pointer" title="Save current voice style as a preset for the current Ngách/Niche">💾 Save</button>
               <button type="button" id="resetStyleBtn" style="background:transparent;border:1px solid var(--border);color:var(--text-dim);font-family:'JetBrains Mono',monospace;font-size:10px;padding:3px 8px;border-radius:4px;cursor:pointer">↺ Reset to default</button>
             </span>
           </label>
           <textarea id="stylePrompt" class="input" rows="4" style="resize:vertical;min-height:80px;line-height:1.5;font-family:'Inter Tight',sans-serif" placeholder="Tell the TTS how to read — tone, pacing, emphasis, accent...">A friendly, conversational male tutor in his late 20s or early 30s. The tone is encouraging, clear, and highly instructional, yet completely informal—like a supportive friend or a private coach explaining a concept side-by-side. The pacing is natural and moderate, with realistic, spontaneous pauses (such as brief 'uh' or 'all right' transitions) to let the listener digest information. Pronunciation is confident, articulation is crisp, with a subtle emphasis on key instructional keywords. No theatrical or overly dramatic expressions; keep it grounded, authentic, and engaging.</textarea>
-          <div style="margin-top:6px">
+          <div class="landscape-only" style="margin-top:6px">
             <div style="font-size:10px;color:var(--text-faint);font-family:'JetBrains Mono',monospace;margin-bottom:4px">💾 SAVED VOICE STYLES — click a chip to restore, ✕ to delete</div>
-            <div id="voicePresets" style="display:flex;gap:6px;flex-wrap:wrap;min-height:26px"></div>
+            <div id="voiceStylePresetsList" style="display:flex;gap:6px;flex-wrap:wrap;min-height:26px"></div>
           </div>
           <div style="font-size:10.5px;color:var(--text-faint);margin-top:4px;font-family:'JetBrains Mono',monospace">
             Mặc định voice đọc ĐÚNG text kịch bản (chính xác nhất) — tông do Voice ở trên + lời thoại quyết định. Bật "Áp style vào giọng" bên dưới nếu muốn thử ép tông theo ô này (thử nghiệm: Gemini TTS đôi khi đọc lẫn vài chữ style). Giữ ngắn 1-2 câu để giảm rủi ro.
@@ -1856,6 +1890,47 @@ function saveVoicePreset(niche, styleText) {
 function deleteVoicePreset(niche) {
   delete voicePresets[niche];
   try { localStorage.setItem(VOICE_PRESETS_KEY, JSON.stringify(voicePresets)); } catch (e) {}
+}
+
+// Voice Style is now stored INDEPENDENTLY per mode scope so editing/saving in one
+// mode never leaks into another. Three scopes:
+//   'portrait'    → 9:16 (vertical) Q&A video
+//   'notebooklm'  → 16:9 landscape · NotebookLM style
+//   'whiteboard'  → 16:9 landscape · Whiteboard style
+const VOICE_STYLE_BY_MODE_KEY = 'manim_studio_voice_style_by_mode_v1';
+const DEFAULT_VOICE_PORTRAIT =
+  "A friendly, conversational male tutor in his late 20s or early 30s. The tone is encouraging, clear, and highly instructional, yet completely informal—like a supportive friend or a private coach explaining a concept side-by-side. The pacing is natural and moderate, with realistic, spontaneous pauses (such as brief 'uh' or 'all right' transitions) to let the listener digest information. Pronunciation is confident, articulation is crisp, with a subtle emphasis on key instructional keywords. No theatrical or overly dramatic expressions; keep it grounded, authentic, and engaging.";
+const DEFAULT_VOICE_LANDSCAPE =
+  "Deliver the script in an energetic, empathetic, and authoritative yet friendly tone, perfectly matching the style of a modern Gen-Z or Millennial content creator. The pacing must be fast, crisp, and conversational with no dead air, keeping natural pauses strictly at sentence boundaries. Start with a high-energy, high-pitch hook to instantly grab attention, speaking directly to the viewer like a supportive peer or a trusted mentor. Dynamically emphasize key action words and critical numbers with strong inflections while slightly dropping the intonation at the end of actionable tips to sound confident and trustworthy. The overall delivery should feel highly passionate, encouraging, and urgent, providing a powerful balance of motivation and grounded reassurance without sounding anxious.";
+
+let voiceStyleByMode = {};
+try {
+  const raw = localStorage.getItem(VOICE_STYLE_BY_MODE_KEY);
+  if (raw) { const p = JSON.parse(raw); if (p && typeof p === 'object') voiceStyleByMode = p; }
+} catch (e) {}
+
+// scope for the CURRENT mode (reads live globals videoMode / videoStyle)
+function voiceScopeKey() {
+  if (typeof videoMode !== 'undefined' && videoMode === '9x16') return 'portrait';
+  return (typeof videoStyle !== 'undefined' && videoStyle === 'whiteboard') ? 'whiteboard' : 'notebooklm';
+}
+function defaultVoiceForScope(scope) {
+  return scope === 'portrait' ? DEFAULT_VOICE_PORTRAIT : DEFAULT_VOICE_LANDSCAPE;
+}
+// Fill the #stylePrompt textarea with the current scope's saved voice style (or its default).
+function loadVoiceStyleForScope() {
+  const el = document.getElementById('stylePrompt');
+  if (!el) return;
+  const scope = voiceScopeKey();
+  const saved = voiceStyleByMode[scope];
+  el.value = (typeof saved === 'string' && saved.length) ? saved : defaultVoiceForScope(scope);
+}
+// Persist whatever is in #stylePrompt to the CURRENT scope only.
+function persistVoiceStyleForScope() {
+  const el = document.getElementById('stylePrompt');
+  if (!el) return;
+  voiceStyleByMode[voiceScopeKey()] = el.value;
+  try { localStorage.setItem(VOICE_STYLE_BY_MODE_KEY, JSON.stringify(voiceStyleByMode)); } catch (e) {}
 }
 
 function savePromptPreset(style, niche, promptText) {
@@ -2908,6 +2983,8 @@ const GOOGLE_CLIENT_ID = '74143587335-7dfuebf91ocn37bo4ej8crsbkc95kb2t.apps.goog
 const GDRIVE_FOLDER_ID = '13otd2UiZPPvrLFh_UOVDSrwpZViAmf42';
 const GSHEETS_ID = '1Oxzonh-jVkxty7w9v8eXjS10qPvacPfL6834eXrHmHg';
 const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
+// Last Drive folder link the user pasted in the upload popup (persisted, prefilled next time)
+const DRIVE_FOLDER_LINK_KEY = 'manim_studio_drive_folder_link_v1';
 
 let savedVideoBlob = null;      // Last rendered MP4 blob, held in memory
 let savedVideoFilename = '';    // Sanitized filename derived from topic
@@ -3689,6 +3766,7 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     }
     renderActiveCanvas(isPlaying ? (audioContext.currentTime - playStartTime) : 0);
+    loadVoiceStyleForScope();   // portrait ↔ landscape → swap in that scope's voice style
   }
   function styleLabel(s) {
     if (s === 'whiteboard') return 'WHITEBOARD · HAND-DRAWN';
@@ -3715,6 +3793,8 @@ window.addEventListener('DOMContentLoaded', () => {
     if (typeof renderIllustrationThumbs === 'function') renderIllustrationThumbs();
     // Reload the prompt textarea with the template for the new style
     if (promptTemplateBox) promptTemplateBox.value = loadPromptTemplate(videoStyle);
+    // Voice Style is per-scope too — swap to this landscape style's voice
+    loadVoiceStyleForScope();
     // Re-render preset chips (they're per-style)
     if (typeof renderPromptPresetChips === 'function') renderPromptPresetChips();
     renderActiveCanvas(isPlaying ? (audioContext.currentTime - playStartTime) : 0);
@@ -4040,6 +4120,7 @@ window.addEventListener('DOMContentLoaded', () => {
   // Apply any restored state from localStorage
   setMode(videoMode);
   refreshStyleButtons();
+  loadVoiceStyleForScope();   // fill Voice Style for the restored mode scope
 
   // Wire auto-save listeners on every field that holds user input
   attachFormStateListeners();
@@ -4061,7 +4142,7 @@ function collectFormState() {
     'badgeText', 'badgeBgColor', 'badgeTextColor',
     'bgPreset', 'bgColor', 'bgLineColor', 'bgPattern',
     'nicheDesc',
-    'stylePrompt', 'scriptText'
+    'scriptText'
   ];
   for (const id of ids) {
     const el = document.getElementById(id);
@@ -4114,7 +4195,6 @@ function loadFormState() {
     setVal('bgLineColor', s.bgLineColor);
     setVal('bgPattern', s.bgPattern);
     setVal('nicheDesc', s.nicheDesc);
-    setVal('stylePrompt', s.stylePrompt);
     setVal('scriptText', s.scriptText);
     setVal('voicePresets', s.voicePresets);
 
@@ -6642,17 +6722,22 @@ const saveVoiceStyleBtn = document.getElementById('saveVoiceStyleBtn');
 const stylePromptEl = document.getElementById('stylePrompt');
 if (resetStyleBtn && stylePromptEl) {
   resetStyleBtn.addEventListener('click', () => {
-    stylePromptEl.value = DEFAULT_STYLE_PROMPT;
+    stylePromptEl.value = defaultVoiceForScope(voiceScopeKey());
+    persistVoiceStyleForScope();
     resetStyleBtn.textContent = '✓ Reset';
     setTimeout(() => { resetStyleBtn.textContent = '↺ Reset to default'; }, 1500);
   });
+}
+// Every edit to the Voice Style textarea saves to the CURRENT mode scope only.
+if (stylePromptEl) {
+  stylePromptEl.addEventListener('input', persistVoiceStyleForScope);
 }
 
 // Voice style preset chips — same UX as image prompt chips: click to restore,
 // ✕ to delete. Save requires the user to enter a Ngách first so we know what
 // to name the preset.
 function renderVoicePresetChips() {
-  const container = document.getElementById('voicePresets');
+  const container = document.getElementById('voiceStylePresetsList');
   if (!container) return;
   container.innerHTML = '';
   const niches = Object.keys(voicePresets).sort();
@@ -8514,24 +8599,131 @@ async function uploadBlobToDrive(blob, filename, folderId, token) {
   return await res.json();  // { id, name, webViewLink, webContentLink }
 }
 
-// ===== Sheets append =====
-async function appendRowToSheet(scriptText, driveLink, token) {
-  // Append to columns A and B (Script | Link), starting at the first empty row.
-  const range = 'A:B';
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${GSHEETS_ID}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ values: [[scriptText, driveLink]] })
+// ===== Drive folder link → folder ID =====
+function parseDriveFolderId(input) {
+  const s = String(input || '').trim();
+  if (!s) return '';
+  let m = s.match(/\/folders\/([a-zA-Z0-9_-]+)/); if (m) return m[1];
+  m = s.match(/[?&]id=([a-zA-Z0-9_-]+)/);          if (m) return m[1];
+  m = s.match(/\/d\/([a-zA-Z0-9_-]+)/);            if (m) return m[1];
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(s)) return s;   // pasted a raw ID
+  return '';
+}
+
+// Popup asking WHERE to upload. Prefills the last-used link (persisted).
+// Resolves with a folderId; rejects with Error('__cancel__') if dismissed.
+function promptDriveFolder() {
+  return new Promise((resolve, reject) => {
+    const modal  = document.getElementById('driveLinkModal');
+    const input  = document.getElementById('driveLinkInput');
+    const err    = document.getElementById('driveLinkErr');
+    const doneBtn   = document.getElementById('driveLinkDone');
+    const cancelBtn = document.getElementById('driveLinkCancel');
+    const closeBtn  = document.getElementById('driveLinkClose');
+
+    let saved = '';
+    try { saved = localStorage.getItem(DRIVE_FOLDER_LINK_KEY) || ''; } catch (e) {}
+    input.value = saved || `https://drive.google.com/drive/folders/${GDRIVE_FOLDER_ID}`;
+    err.textContent = '';
+    modal.classList.add('show');
+    setTimeout(() => { input.focus(); input.select(); }, 50);
+
+    const cleanup = () => {
+      modal.classList.remove('show');
+      doneBtn.removeEventListener('click', onDone);
+      cancelBtn.removeEventListener('click', onCancel);
+      closeBtn.removeEventListener('click', onCancel);
+      modal.removeEventListener('click', onBackdrop);
+      input.removeEventListener('keydown', onKey);
+    };
+    const onDone = () => {
+      const link = input.value.trim();
+      const id = parseDriveFolderId(link);
+      if (!id) { err.textContent = 'Link folder không hợp lệ. Dán kiểu drive.google.com/drive/folders/…'; return; }
+      try { localStorage.setItem(DRIVE_FOLDER_LINK_KEY, link); } catch (e) {}
+      cleanup(); resolve(id);
+    };
+    const onCancel   = () => { cleanup(); reject(new Error('__cancel__')); };
+    const onBackdrop = (e) => { if (e.target === modal) onCancel(); };
+    const onKey = (e) => {
+      if (e.key === 'Enter')  { e.preventDefault(); onDone(); }
+      if (e.key === 'Escape') { onCancel(); }
+    };
+    doneBtn.addEventListener('click', onDone);
+    cancelBtn.addEventListener('click', onCancel);
+    closeBtn.addEventListener('click', onCancel);
+    modal.addEventListener('click', onBackdrop);
+    input.addEventListener('keydown', onKey);
   });
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Sheet append HTTP ${res.status}: ${errText.slice(0, 220)}`);
+}
+
+// ===== Sheets logging — header-aware + STT auto-increment =====
+// Reads the sheet, locates the "STT", "Script" and "final link video" columns
+// by header name, finds the largest existing STT, and writes the new row at the
+// next empty row with STT+1 in the right columns (not a blind A/B append).
+function normHdr(h) { return String(h == null ? '' : h).trim().toLowerCase().replace(/\s+/g, ' '); }
+
+async function logToSheetSmart(scriptText, driveLink, token) {
+  // 1) Read the whole first sheet (A:AZ covers the log columns).
+  const readUrl = `https://sheets.googleapis.com/v4/spreadsheets/${GSHEETS_ID}/values/A:AZ`;
+  const readRes = await fetch(readUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+  if (!readRes.ok) {
+    const t = await readRes.text();
+    throw new Error(`Sheet read HTTP ${readRes.status}: ${t.slice(0, 200)}`);
   }
-  return await res.json();
+  const readData = await readRes.json();
+  const values = readData.values || [];
+  if (values.length === 0) throw new Error('Sheet trống hoặc không đọc được header (A:AZ).');
+
+  // 2) Locate columns by header name (row 1).
+  const headers = values[0];
+  const findIdx = (matcher) => {
+    for (let i = 0; i < headers.length; i++) if (matcher(normHdr(headers[i]))) return i;
+    return -1;
+  };
+  const sttIdx    = findIdx(h => h === 'stt' || h.startsWith('stt') || h === 'no' || h === 'no.' || h === '#' || h === 'order' || h.includes('thứ tự') || h.includes('thu tu'));
+  const scriptIdx = findIdx(h => h === 'script' || h.startsWith('script'));
+  const linkIdx   = findIdx(h => h === 'final link video' || (h.includes('final') && h.includes('link') && h.includes('video')));
+
+  const missing = [];
+  if (sttIdx < 0)    missing.push('STT');
+  if (scriptIdx < 0) missing.push('Script');
+  if (linkIdx < 0)   missing.push('final link video');
+  if (missing.length) {
+    throw new Error(`Không thấy cột: ${missing.join(', ')}. Header đang có: [${headers.map(h => String(h)).join(' | ')}]`);
+  }
+
+  // 3) Largest existing STT → next number.
+  let maxStt = 0;
+  for (let r = 1; r < values.length; r++) {
+    const raw = values[r] && values[r][sttIdx];
+    const n = parseInt(String(raw == null ? '' : raw).replace(/[^\d-]/g, ''), 10);
+    if (!isNaN(n) && n > maxStt) maxStt = n;
+  }
+  const nextStt = maxStt + 1;
+
+  // 4) Next empty row = one past the last row that has any data.
+  const nextRow = values.length + 1;
+
+  // 5) Build the row, placing each value in its own column.
+  const width = Math.max(headers.length, sttIdx, scriptIdx, linkIdx) + 1;
+  const row = new Array(width).fill('');
+  row[sttIdx]    = nextStt;
+  row[scriptIdx] = scriptText;
+  row[linkIdx]   = driveLink;
+
+  // 6) Write at the exact next row (A{nextRow} as top-left, expands to row width).
+  const updUrl = `https://sheets.googleapis.com/v4/spreadsheets/${GSHEETS_ID}/values/${encodeURIComponent('A' + nextRow)}?valueInputOption=USER_ENTERED`;
+  const updRes = await fetch(updUrl, {
+    method: 'PUT',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values: [row] })
+  });
+  if (!updRes.ok) {
+    const t = await updRes.text();
+    throw new Error(`Sheet write HTTP ${updRes.status}: ${t.slice(0, 200)}`);
+  }
+  return { nextStt, nextRow };
 }
 
 // ===== Full upload flow (button handler) =====
@@ -8540,6 +8732,17 @@ async function handleUploadFlow() {
     saveModalStatus('No video in memory. Save one first.', 'err');
     return;
   }
+
+  // Step 1 — ask WHERE to upload (popup, prefilled with last-used link).
+  let folderId;
+  try {
+    folderId = await promptDriveFolder();
+  } catch (e) {
+    if (e && e.message === '__cancel__') { saveModalStatus('Đã huỷ upload.', ''); return; }
+    saveModalStatus('✗ ' + e.message, 'err');
+    return;
+  }
+
   setModalButtonsDisabled(true);
   try {
     saveModalStatus('⏳ Loading Google auth…');
@@ -8549,17 +8752,17 @@ async function handleUploadFlow() {
     const token = await requestGoogleAccessToken();
 
     saveModalStatus(`⏳ Uploading ${savedVideoFilename} to Drive…`);
-    const uploaded = await uploadBlobToDrive(savedVideoBlob, savedVideoFilename, GDRIVE_FOLDER_ID, token);
+    const uploaded = await uploadBlobToDrive(savedVideoBlob, savedVideoFilename, folderId, token);
     const driveLink = uploaded.webViewLink ||
       `https://drive.google.com/file/d/${uploaded.id}/view`;
 
-    saveModalStatus('⏳ Appending row to Sheet…');
+    saveModalStatus('⏳ Reading sheet & finding next STT…');
     const scriptText = (document.getElementById('scriptText')?.value || '').trim();
-    await appendRowToSheet(scriptText, driveLink, token);
+    const { nextStt } = await logToSheetSmart(scriptText, driveLink, token);
 
     const sheetUrl = `https://docs.google.com/spreadsheets/d/${GSHEETS_ID}/edit#gid=0`;
     saveModalStatus(
-      `✓ Done. <a href="${driveLink}" target="_blank" rel="noopener">Open in Drive</a> · ` +
+      `✓ Done · STT ${nextStt}. <a href="${driveLink}" target="_blank" rel="noopener">Open in Drive</a> · ` +
       `<a href="${sheetUrl}" target="_blank" rel="noopener">Open Sheet</a>`,
       'ok'
     );
