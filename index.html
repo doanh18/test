@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Manim Studio v38_18_3_46 — Sheet logging: STT column now OPTIONAL (this sheet has none — "Id" is column A). Requires only Script + final link video; writes to next empty row (the row number is the sequence). Fills only those two columns, leaves Id/status/accounts untouched. Includes v3_45 per-mode voice style, v3_44 upload popup, v3_43 whiteboard de-prime. -->
+<!-- Manim Studio v38_18_3_47 — Sheet logging fix: next row is now the row after the last Script/link CONTENT (ignores template columns pre-filled to the grid limit, which caused "exceeds grid limits" at row 1000). Writes only the Script + final link video cells (batchUpdate) so template values in other columns are preserved. Includes v3_46 optional STT, v3_45 per-mode voice, v3_44 upload popup, v3_43 whiteboard de-prime. -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -8692,10 +8692,19 @@ async function logToSheetSmart(scriptText, driveLink, token) {
     throw new Error(`Không thấy cột: ${missing.join(', ')}. Header đang có: [${headers.map(h => String(h)).join(' | ')}]`);
   }
 
-  // 3) Next empty row = one past the last row that has any data.
-  //    The spreadsheet ROW NUMBER is the sequence (STT). If a dedicated STT
-  //    column also exists we fill it with max+1; if not, the row number is enough.
-  const nextRow = values.length + 1;
+  // 3) Find the last row that actually has Script/link CONTENT. Other columns
+  //    (status, accounts…) may be pre-filled by a template all the way down to the
+  //    grid limit, which would otherwise push us past the end of the sheet. Keying
+  //    off Script/link keeps us at the true next entry (e.g. row 253).
+  let lastContentRow = 1; // header is row 1
+  for (let r = 1; r < values.length; r++) {
+    const sc = values[r] && values[r][scriptIdx];
+    const lk = values[r] && values[r][linkIdx];
+    if ((sc != null && String(sc).trim() !== '') || (lk != null && String(lk).trim() !== '')) {
+      lastContentRow = r + 1;   // 1-based spreadsheet row
+    }
+  }
+  const nextRow = lastContentRow + 1;
 
   let nextStt = null;
   if (sttIdx >= 0) {
@@ -8708,20 +8717,20 @@ async function logToSheetSmart(scriptText, driveLink, token) {
     nextStt = maxStt + 1;
   }
 
-  // 4) Build the row, placing each value in its own column. Only write up to the
-  //    furthest needed column so trailing columns (status, accounts…) stay untouched.
-  const maxIdx = Math.max(scriptIdx, linkIdx, sttIdx >= 0 ? sttIdx : 0);
-  const row = new Array(maxIdx + 1).fill('');
-  if (sttIdx >= 0) row[sttIdx] = nextStt;
-  row[scriptIdx] = scriptText;
-  row[linkIdx]   = driveLink;
+  // 4) Write ONLY the target cells (Script + link [+ STT]) so any template values
+  //    already sitting in other columns of that row are preserved.
+  const colA1 = (idx) => { let s = '', n = idx + 1; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+  const data = [
+    { range: `${colA1(scriptIdx)}${nextRow}`, values: [[scriptText]] },
+    { range: `${colA1(linkIdx)}${nextRow}`,   values: [[driveLink]] }
+  ];
+  if (sttIdx >= 0) data.push({ range: `${colA1(sttIdx)}${nextRow}`, values: [[nextStt]] });
 
-  // 6) Write at the exact next row (A{nextRow} as top-left, expands to row width).
-  const updUrl = `https://sheets.googleapis.com/v4/spreadsheets/${GSHEETS_ID}/values/${encodeURIComponent('A' + nextRow)}?valueInputOption=USER_ENTERED`;
+  const updUrl = `https://sheets.googleapis.com/v4/spreadsheets/${GSHEETS_ID}/values:batchUpdate`;
   const updRes = await fetch(updUrl, {
-    method: 'PUT',
+    method: 'POST',
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ values: [row] })
+    body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data })
   });
   if (!updRes.ok) {
     const t = await updRes.text();
